@@ -3,42 +3,41 @@ const path = require('node:path')
 const express = require('express')
 const FileResolver = require('../lib/upload-file-resolver.js')
 const createPool = require('../lib/worker-pool.js')
+const { rejects, throws } = require('node:assert')
 
 // workers pool
-const fetcherPool = createPool('../workers/fetch-zip.js')
-const fileParserPool = createPool('../workers/parse-file.js')
+const downloaders = createPool('../workers/zip-downloader.worker.js')
+const tsvParsers = createPool('../workers/tsv-parser.worker.js')
 
 // utils
-function promisePartition(array) {
-  const passes = array
-    .filter((item) => item.status === 'fulfilled')
-    .map((item) => item.value)
-
-  const fails = array
-    .filter((item) => item.status === 'rejected')
-    .map((item) => ({ url: item.reason.url, message: item.reason.message }))
-
+function promisesPartition(array) {
+  const passes = array.filter((item) => item.status === 'fulfilled')
+  const fails = array.filter((item) => item.status === 'rejected')
   return [passes, fails]
 }
 
-async function fetchZip(orders, onZipFetched) {
-  return await Promise.allSettled(
-    orders.map((order) => {
-      const url = order['customized-url']
-      const orderId = order['order-id']
+function downloadZip(orders, onDone) {
+  const promises = orders.map((order) => {
+    const url = order['customized-url']
+    const orderId = order['order-id']
+    const report = (label, message) =>
+      onDone(`OrderID ${orderId} [${label}]: ${message}`)
 
-      return fetcherPool
-        .exec(url)
-        .then((buffer) => {
-          onZipFetched(orderId, buffer)
-          return buffer
+    return new Promise((resolve, reject) => {
+      downloaders
+        .exec({ orderId, url })
+        .then((path) => {
+          report('downloaded', path)
+          resolve(path)
         })
         .catch((error) => {
-          error.url = url
-          throw error
+          report('error', error.message)
+          reject(error)
         })
     })
-  )
+  })
+
+  return Promise.allSettled(promises)
 }
 
 function processUploadedFile(request, response, next) {
@@ -46,20 +45,15 @@ function processUploadedFile(request, response, next) {
   const file = request.file
   const filename = file.originalname
 
-  log(`JOB::${filename}::START PROCESSING`)
-  fileParserPool
+  log(`JOB::${filename}::[START PROCESSING]`)
+  tsvParsers
     .exec(file)
-    .then((orders) =>
-      fetchZip(orders, (orderId, buffer) => {
-        log(`${orderId} [fetched]`)
-        fs.writeFile(`downloads/${orderId}.zip`, buffer)
-      })
-    )
-    .then((results) => {
-      const [passes, fails] = promisePartition(results)
-      log(`JOB::${filename}::[PASSED ${passes.length}][FAILED ${fails.length}]`)
+    .then((orders) => downloadZip(orders, log))
+    .then((promises) => {
+      const [passes, fails] = promisesPartition(promises)
+      log(`JOB::${filename}::[PASSED ${passes.length}, FAILED ${fails.length}]`)
     })
-    .catch((error) => log('Pool:', error))
+    .catch(next)
 
   response.ok(`Processing ${file.originalname}`)
 }

@@ -10,7 +10,4 @@ parentPort.on('message', (file) => {
     .pipe(csv({ separator: '\t' }))
     .on('data', (data) => results.push(data))
     .on('end', () => parentPort.postMessage(results))
-    .on('error', (error) => {
-      throw error
-    })
 })
