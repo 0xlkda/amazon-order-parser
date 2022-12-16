@@ -20,11 +20,12 @@ function processUploadedFile(request, response, next) {
   const file = request.file
   const filename = file.originalname
 
-  log(`JOB::${filename}::[START PROCESSING]`)
+  log(`PARSER::${filename}::[PROCESSING]`)
   tsvParsers
     .exec(file)
     .then((orders) => {
       request.orders = orders
+      log(`PARSER::${filename}::[DONE]::[ORDERS ${orders.length}]`)
       next()
     })
     .catch(next)
@@ -34,14 +35,14 @@ function processUploadedFile(request, response, next) {
 
 function downloadZipFiles(request, response, next) {
   const log = request.log
-  const file = request.file
-  const filename = file.originalname
+  const filename = request.file.originalname
   const orders = request.orders
 
   if (!orders || !orders.length) {
-    return log(`JOB::${filename}::[NO ORDER FOUND]`)
+    return log(`DOWNLOADER::${filename}::[DONE]::[NO ORDER FOUND]`)
   }
 
+  log(`DOWNLOADER::${filename}::[START]`)
   const promises = orders.map((order) => {
     const zipUrl = order['customized-url']
     const orderId = order['order-id']
@@ -63,7 +64,8 @@ function downloadZipFiles(request, response, next) {
 
   Promise.allSettled(promises).then((promises) => {
     const [passes, fails] = promisesPartition(promises)
-    log(`JOB::${filename}::[PASSED ${passes.length}, FAILED ${fails.length}]`)
+    const countMsg = `[OK ${passes.length}, FAIL ${fails.length}]`
+    log(`DOWNLOADER::${filename}::[DONE]::${countMsg}`)
   })
 
   next()
