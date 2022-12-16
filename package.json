@@ -1,7 +1,7 @@
 {
   "name": "amz-orders-parser",
   "version": "1.0.0",
-  "description": "",
+  "description": "Amazon orders tool",
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
@@ -9,7 +9,7 @@
     "prettier": "prettier -w src"
   },
   "keywords": [],
-  "author": "",
+  "author": "0xlkda",
   "license": "ISC",
   "dependencies": {
     "csv-parser": "^3.0.0",
