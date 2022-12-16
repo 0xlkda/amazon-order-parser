@@ -4,6 +4,9 @@ const app = express()
 const routes = require('./src/routes')
 const Log = console.log
 
+fs.mkdir('uploads', { recursive: true })
+fs.mkdir('downloads', { recursive: true })
+
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
@@ -23,7 +26,9 @@ function StackTrace({ stack, message }) {
     write() {
       fs.writeFile(unhandleErrors, format(stack), { flag: 'a+' })
         .then(() => Log(`System: ${unhandleErrors} written`))
-        .catch((error) => Log(`System: could not write to ${unhandleErrors}`, error.message))
+        .catch((error) =>
+          Log(`System: could not write to ${unhandleErrors}`, error.message)
+        )
     },
   }
 }
