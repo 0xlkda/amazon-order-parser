@@ -3,7 +3,6 @@ const path = require('node:path')
 const express = require('express')
 const FileResolver = require('../lib/upload-file-resolver.js')
 const createPool = require('../lib/worker-pool.js')
-const { rejects, throws } = require('node:assert')
 
 // workers pool
 const downloaders = createPool('../workers/zip-downloader.worker.js')
@@ -16,16 +15,16 @@ function promisesPartition(array) {
   return [passes, fails]
 }
 
-function downloadZip(orders, onDone) {
+function downloadZipFiles(orders, onDone) {
   const promises = orders.map((order) => {
-    const url = order['customized-url']
+    const zipUrl = order['customized-url']
     const orderId = order['order-id']
     const report = (label, message) =>
       onDone(`OrderID ${orderId} [${label}]: ${message}`)
 
     return new Promise((resolve, reject) => {
       downloaders
-        .exec({ orderId, url })
+        .exec({ orderId, url: zipUrl })
         .then((path) => {
           report('downloaded', path)
           resolve(path)
@@ -48,7 +47,7 @@ function processUploadedFile(request, response, next) {
   log(`JOB::${filename}::[START PROCESSING]`)
   tsvParsers
     .exec(file)
-    .then((orders) => downloadZip(orders, log))
+    .then((orders) => downloadZipFiles(orders, log))
     .then((promises) => {
       const [passes, fails] = promisesPartition(promises)
       log(`JOB::${filename}::[PASSED ${passes.length}, FAILED ${fails.length}]`)
