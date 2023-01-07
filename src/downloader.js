@@ -2,62 +2,64 @@ import https from 'node:https'
 import { parse, stringify } from 'JSONStream'
 import {
   isFile,
-  getAssetsDir,
+  createRootPath,
   createReadStream,
   createWriteStream,
 } from './disk.js'
 
-const [id] = process.argv.slice(2)
+if (typeof process.send !== 'function') {
+  process.send = console.log
+}
 
+const [id] = process.argv.slice(2)
 if (!id) {
-  throw new Error(`id is require`)
+  process.send(`id is required`)
   process.exit(1)
 }
 
 try {
-  download(id, (ziplist) => {
-    console.log(ziplist)
-    process.send?.(ziplist)
+  run(id, (result) => {
+    process.send(result)
     process.exit()
   })
 } catch (err) {
-  console.log(err.message)
-  process.send?.(err.message)
+  process.send(err)
   process.exit(1)
 }
 
-function download(id, callback) {
-  const assetsDir = getAssetsDir(id)
-  const inputFile = `${assetsDir}${id}.json`
-  const outputFile = `${assetsDir}${id}.ziplist`
+function run(id, callback) {
+  const assetsRoot = createRootPath(id)
+  const inputFile = `${assetsRoot}/${id}.json`
+  const outputFile = `${assetsRoot}/${id}.ziplist`
 
   if (!isFile(`${inputFile}`)) {
     throw new Error(`${inputFile} not valid`)
   }
 
-  const promises = []
+  const zipPathPromises = []
   createReadStream(inputFile)
     .pipe(parse('*'))
     .on('data', (item) => {
-      const saveTo = createWriteStream(`${assetsDir}${item.orderId}.zip`)
-      promises.push(getUrl(item.url, saveTo))
+      const orderId = item['order-id']
+      const zipUrl = item['customized-url']
+      const saveTo = createWriteStream(`${assetsRoot}/${orderId}.zip`)
+      zipPathPromises.push(downloadZipToPath(zipUrl, saveTo))
     })
     .on('end', async () => {
-      const results = await Promise.allSettled(promises)
-      const paths = results
+      const zipPaths = (await Promise.allSettled(zipPathPromises))
         .filter((rs) => rs.status === 'fulfilled')
         .map((rs) => rs.value)
         .join('\n')
 
-      createWriteStream(outputFile).write(paths, () => callback(outputFile))
+      createWriteStream(outputFile).write(zipPaths, () => callback(outputFile))
     })
 }
 
-function getUrl(url, destination) {
+function downloadZipToPath(url, destination) {
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
       res.pipe(destination)
-      destination.on('error', () => reject(destination.path))
+      destination.on('error', (err) => reject(err))
       destination.on('finish', () => resolve(destination.path))
     })
   })
