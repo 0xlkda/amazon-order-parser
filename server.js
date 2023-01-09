@@ -4,35 +4,59 @@ import path from 'node:path'
 import { fork } from 'node:child_process'
 import express from 'express'
 import busboy from 'busboy' // multipart/form-data parser
+import * as task from './task.js'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-const translate = (code) => (code === 0 ? 'success' : 'error')
-const libDir = path.join(process.cwd(), 'lib')
 const tmpDir = path.join(process.cwd(), '.tmp')
 const createRoot = (id) => `${id}.root`
 const getRoot = (id) => path.resolve(tmpDir, createRoot(id))
 
 const app = express()
 
+// UPLOAD
+app.post('/upload', (req, res, next) => {
+  const bb = busboy({ headers: req.headers })
+
+  bb.on('error', (err) => {
+    return res.end(err.message)
+  })
+
+  bb.on('close', () => {
+    res.redirect(req.triggerUrl)
+  })
+
+  bb.on('file', (name, file, info) => {
+    req.triggerUrl = `/start/${info.filename}`
+
+    const rootDir = `${tmpDir}/${createRoot(info.filename)}`
+    fs.mkdirSync(rootDir, { recursive: true })
+    file.pipe(fs.createWriteStream(`${rootDir}/${info.filename}`))
+  })
+
+  req.pipe(bb)
+})
+
+// HOMEPAGE
+app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/html')
+  res.sendFile(path.join(__dirname, '/index.html'))
+})
+
+// MIDDLEWARE
 function ensureRootDirCreated(req, res, next) {
   const id = req.params.id
   const rootDir = getRoot(id)
+
   if (!fs.existsSync(rootDir)) {
-    return res.end(`"${id}" not valid`)
+    return res.end(`${id} not valid`)
   }
 
   req.rootDir = rootDir
   next()
 }
 
-// VIEWS
-app.get('/', (req, res) => {
-  res.setHeader('Content-Type', 'text/html')
-  res.sendFile(path.join(__dirname, '/index.html'))
-})
-
+// ROUTES
 app.get('/status/:id', ensureRootDirCreated, (req, res, next) => {
   const { id } = req.params
   const rootDir = req.rootDir
@@ -102,117 +126,10 @@ app.get('/csv/:id/download/:name', ensureRootDirCreated, (req, res, next) => {
     .pipe(res)
 })
 
-// UPLOAD
-app.post('/upload', (req, res, next) => {
-  const bb = busboy({ headers: req.headers })
-
-  bb.on('error', (err) => {
-    return res.end(err.message)
-  })
-
-  bb.on('close', () => {
-    res.redirect(req.triggerUrl)
-  })
-
-  bb.on('file', (name, file, info) => {
-    req.triggerUrl = `/start/${info.filename}`
-
-    const rootDir = `${tmpDir}/${createRoot(info.filename)}`
-    fs.mkdirSync(rootDir, { recursive: true })
-    file.pipe(fs.createWriteStream(`${rootDir}/${info.filename}`))
-  })
-
-  req.pipe(bb)
-})
-
-// STEPS
-function task(script, args) {
-  return new Promise((resolve, reject) => {
-    const child = fork(`${libDir}/${script}`, args)
-    child.on('message', resolve)
-    child.on('error', reject)
-  })
-}
-
-app.get('/parse-tsv/:id', ensureRootDirCreated, (req, res, next) => {
-  const id = req.params.id
-  const rootDir = req.rootDir
-  const input = `${rootDir}/${id}`
-  const output = `${rootDir}/${id}.json`
-  const parser = fork(`${libDir}/tsv-parser.js`, [input, output])
-  parser.on('message', (msg) => res.end(msg))
-})
-
-app.get('/download/:id', ensureRootDirCreated, (req, res, next) => {
-  const id = req.params.id
-  const rootDir = req.rootDir
-  const input = `${rootDir}/${id}.json`
-  const output = `${rootDir}/${id}.ziplist`
-  const downloader = fork(`${libDir}/downloader.js`, [input, output])
-  downloader.on('message', (msg) => res.end(msg))
-})
-
-app.get('/decompress/:id', ensureRootDirCreated, (req, res, next) => {
-  const id = req.params.id
-  const rootDir = req.rootDir
-  const input = `${rootDir}/${id}.ziplist`
-  const output = `${rootDir}/decompressed/`
-  const decompressor = fork(`${libDir}/decompressor.js`, [input, output])
-  decompressor.on('message', (msg) => res.end(msg))
-})
-
-app.get('/parse-customization/:id', ensureRootDirCreated, (req, res, next) => {
-  const id = req.params.id
-  const rootDir = req.rootDir
-  const input = `${rootDir}/decompressed`
-  const output = `${rootDir}/${id}.customization.json`
-  const parser = fork(`${libDir}/customization-data-parser.js`, [input, output])
-  parser.on('message', (msg) => res.end(msg))
-})
-
-app.get('/generate-csv/:id', ensureRootDirCreated, (req, res, next) => {
-  const id = req.params.id
-  const rootDir = req.rootDir
-  const input = `${rootDir}/${id}.json`
-  const output = `${rootDir}/${id}.customization.json`
-  const generator = fork(`${libDir}/csv-generator.js`, [input, output])
-  generator.on('message', (msg) => res.end(msg))
-})
-
 // COMPOSE STEPS
 app.get('/start/:id', ensureRootDirCreated, async (req, res, next) => {
   const id = req.params.id
   const rootDir = req.rootDir
-
-  function parseTSV() {
-    const input = `${rootDir}/${id}`
-    const output = `${rootDir}/${id}.json`
-    return task('tsv-parser.js', [input, output])
-  }
-
-  function download() {
-    const input = `${rootDir}/${id}.json`
-    const output = `${rootDir}/${id}.ziplist`
-    return task('downloader.js', [input, output])
-  }
-
-  function decompress() {
-    const input = `${rootDir}/${id}.ziplist`
-    const output = `${rootDir}/decompressed/`
-    return task('decompressor.js', [input, output])
-  }
-
-  function parseCustomizationData() {
-    const input = `${rootDir}/decompressed`
-    const output = `${rootDir}/${id}.customization.json`
-    return task('customization-data-parser.js', [input, output])
-  }
-
-  function generateCSV() {
-    const input = `${rootDir}/${id}.json`
-    const output = `${rootDir}/${id}.customization.json`
-    return task('csv-generator.js', [input, output])
-  }
 
   async function updateStatus(msg) {
     await fs.promises.writeFile(`${rootDir}/${id}.status`, msg)
@@ -226,19 +143,19 @@ app.get('/start/:id', ensureRootDirCreated, async (req, res, next) => {
     })
 
     updateStatus(`parsing tsv file`)
-    await parseTSV()
+    await task.parseTSV(id, rootDir)
 
     updateStatus(`downloading zip`)
-    await download()
+    await task.download(id, rootDir)
 
     updateStatus(`unziping`)
-    await decompress()
+    await task.decompress(id, rootDir)
 
     updateStatus(`parsing customize info`)
-    await parseCustomizationData()
+    await task.parseCustomizationData(id, rootDir)
 
     updateStatus(`generating csv`)
-    await generateCSV()
+    await task.generateCSV(id, rootDir)
 
     updateStatus(`[DONE] csv generated: <a href="/csv/${id}">view</a>`)
   } catch (err) {
@@ -246,4 +163,49 @@ app.get('/start/:id', ensureRootDirCreated, async (req, res, next) => {
   }
 })
 
+// STEPS
+app.get('/parse-tsv/:id', ensureRootDirCreated, (req, res, next) => {
+  const id = req.params.id
+  const rootDir = req.rootDir
+  task
+    .parseTSV(id, rootDir)
+    .then((msg) => res.end(msg))
+    .catch((err) => res.end(err))
+})
+
+app.get('/download/:id', ensureRootDirCreated, (req, res, next) => {
+  const id = req.params.id
+  const rootDir = req.rootDir
+  task
+    .download(id, rootDir)
+    .then((msg) => res.end(msg))
+    .catch((err) => res.end(err))
+})
+
+app.get('/decompress/:id', ensureRootDirCreated, (req, res, next) => {
+  const id = req.params.id
+  const rootDir = req.rootDir
+  task
+    .decompress(id, rootDir)
+    .then((msg) => res.end(msg))
+    .catch((err) => res.end(err))
+})
+
+app.get('/parse-customization/:id', ensureRootDirCreated, (req, res, next) => {
+  const id = req.params.id
+  const rootDir = req.rootDir
+  task
+    .parseCustomizationData(id, rootDir)
+    .then((msg) => res.end(msg))
+    .catch((err) => res.end(err))
+})
+
+app.get('/generate-csv/:id', ensureRootDirCreated, (req, res, next) => {
+  const id = req.params.id
+  const rootDir = req.rootDir
+  task
+    .generateCSV(id, rootDir)
+    .then((msg) => res.end(msg))
+    .catch((err) => res.end(err))
+})
 app.listen(3000, () => console.log('running at :3000'))
