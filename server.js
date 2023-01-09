@@ -106,11 +106,15 @@ app.get('/csv/:id', ensureRootDirCreated, (req, res, next) => {
     if (err) {
       return res.end(`${id} not ready yet`)
     }
+    const ENDPOINT = `http://amz-tool.jqwerty.com`
+    const createUrls = (files) => {
+      const createUrl = (file) => `${ENDPOINT}/csv/${id}/download/${file}`
+      return files
+        .map((file) => `<a href="${createUrl(file)}">${file}</a>`)
+        .join('\n')
+    }
 
-    const createUrls = (files) =>
-      files.map((file) => `/csv/${id}/download/${file}`)
-
-    return res.json(createUrls(files))
+    return res.send(createUrls(files))
   })
 })
 
