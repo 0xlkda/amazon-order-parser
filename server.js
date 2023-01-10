@@ -103,18 +103,23 @@ app.get('/csv/:id', ensureRootDirCreated, (req, res, next) => {
   const rootDir = req.rootDir
 
   fs.readdir(`${rootDir}/csv/`, (err, files) => {
-    if (err) {
-      return res.end(`${id} not ready yet`)
-    }
+    if (err) return res.end(`${id} not ready yet`)
+
     const ENDPOINT = `http://amz-tool.jqwerty.com`
     const createUrls = (files) => {
       const createUrl = (file) => `${ENDPOINT}/csv/${id}/download/${file}`
       return files
+        .sort(() => -1)
         .map((file) => `<a href="${createUrl(file)}">${file}</a>`)
         .join('\n')
     }
 
-    return res.send(createUrls(files))
+    const html = `
+    <div style="display:flex; flex-direction: column; gap: 1rem;">
+      ${createUrls(files)}
+    </div>
+    `
+    return res.send(html)
   })
 })
 
