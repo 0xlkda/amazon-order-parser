@@ -146,8 +146,6 @@ app.get('/start/:id', ensureRootDirCreated, async (req, res, next) => {
 
   try {
     updateStatus(`${id} created`).then(() => {
-      res.setHeader('Content-Type', 'application/json')
-      res.setHeader('Location', `/status/${id}`)
       res.redirect(`/status/${id}`)
     })
 
